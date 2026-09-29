@@ -1,0 +1,322 @@
+// NodeWave — Project Deliverable Management System
+// Prisma 7 · PostgreSQL · Rust-free client (prisma-client generator)
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "esm"
+}
+
+// Connection string lives in prisma.config.ts (Migrate) and is passed to the
+// client through a driver adapter at runtime.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  PRODUCT_MANAGER
+  INTERNAL_TEAM
+  CLIENT_GUEST
+}
+
+enum Department {
+  PRODUCT
+  UI_UX
+  FRONTEND
+  BACKEND
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+}
+
+enum TaskStatus {
+  TODO
+  BLOCKED
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskLogAction {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  REASSIGNED
+  DESCRIPTION_CHANGED
+  VISIBILITY_CHANGED
+  DEPENDENCY_ADDED
+  DEPENDENCY_REMOVED
+  AUTO_BLOCKED
+  AUTO_UNBLOCKED
+  ATTACHMENT_ADDED
+  COMMENT_ADDED
+  SOFT_DELETED
+  RESTORED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+/// A client company. Every project belongs to exactly one organisation; that
+/// organisation is the isolation boundary a CLIENT_GUEST can ever see.
+model ClientOrganization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  projects Project[]
+  users    User[]
+
+  @@map("client_organizations")
+}
+
+model User {
+  id           String      @id @default(uuid()) @db.Uuid
+  email        String      @unique
+  /// Never leaves the server. `toPublicUser` is the only shape that reaches a client.
+  passwordHash String      @map("password_hash")
+  name         String
+  avatarUrl    String?     @map("avatar_url")
+  role         Role
+  /// Absent for CLIENT_GUEST.
+  department   Department?
+  clientOrgId  String?     @map("client_org_id") @db.Uuid
+  isActive     Boolean     @default(true) @map("is_active")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  deletedAt    DateTime?   @map("deleted_at")
+
+  clientOrg ClientOrganization? @relation(fields: [clientOrgId], references: [id])
+
+  assignedTasks  Task[]           @relation("TaskAssignee")
+  createdTasks   Task[]           @relation("TaskCreator")
+  projectMembers ProjectMember[]
+  taskLogs       TaskLog[]
+  comments       Comment[]
+  attachments    Attachment[]
+  refreshTokens  RefreshToken[]
+  createdDeps    TaskDependency[] @relation("DependencyCreator")
+
+  @@index([clientOrgId])
+  @@index([role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String
+  code        String        @unique
+  description String?
+  status      ProjectStatus @default(PLANNING)
+  clientOrgId String        @map("client_org_id") @db.Uuid
+  /// Optimistic lock for project-level edits.
+  version     Int           @default(1)
+  startDate   DateTime?     @map("start_date")
+  dueDate     DateTime?     @map("due_date")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  clientOrg ClientOrganization @relation(fields: [clientOrgId], references: [id])
+  tasks     Task[]
+  members   ProjectMember[]
+  taskLogs  TaskLog[]
+
+  @@index([clientOrgId])
+  @@index([deletedAt])
+  @@map("projects")
+}
+
+/// Assignment of a user to a project. This is what makes an INTERNAL_TEAM
+/// member's read access project-scoped instead of global.
+model ProjectMember {
+  id        String    @id @default(uuid()) @db.Uuid
+  projectId String    @map("project_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+model Task {
+  id              String     @id @default(uuid()) @db.Uuid
+  projectId       String     @map("project_id") @db.Uuid
+  title           String
+  description     String?
+  status          TaskStatus @default(TODO)
+  priority        Priority   @default(MEDIUM)
+  department      Department
+  assigneeId      String?    @map("assignee_id") @db.Uuid
+  createdById     String     @map("created_by_id") @db.Uuid
+  /// Only a PRODUCT_MANAGER may flip this. Sole switch that exposes a task to
+  /// a CLIENT_GUEST.
+  isClientVisible Boolean    @default(false) @map("is_client_visible")
+  /// Optimistic lock. Bumped on every mutation; a stale write is rejected
+  /// with 409 instead of silently clobbering a concurrent change.
+  version         Int        @default(1)
+  orderIndex      Int        @default(0) @map("order_index")
+  estimateHours   Float?     @map("estimate_hours")
+  dueDate         DateTime?  @map("due_date")
+  startedAt       DateTime?  @map("started_at")
+  completedAt     DateTime?  @map("completed_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id])
+  logs        TaskLog[]
+  comments    Comment[]
+  attachments Attachment[]
+
+  /// Edges where this task is the dependent (the one held back).
+  blockedBy     TaskDependency[] @relation("DependentTask")
+  /// Edges where this task is the prerequisite.
+  prerequisites TaskDependency[] @relation("PrerequisiteTask")
+
+  @@index([projectId, status])
+  @@index([assigneeId])
+  @@index([deletedAt])
+  @@map("tasks")
+}
+
+/// Directed edge: `taskId` cannot progress past its prerequisites until every
+/// row in `dependsOnTaskId` reaches DONE. Cycles are rejected on insert.
+model TaskDependency {
+  id              String   @id @default(uuid()) @db.Uuid
+  taskId          String   @map("task_id") @db.Uuid
+  dependsOnTaskId String   @map("depends_on_task_id") @db.Uuid
+  createdById     String   @map("created_by_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  task          Task @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask Task @relation("PrerequisiteTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdBy     User @relation("DependencyCreator", fields: [createdById], references: [id])
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+// ---------------------------------------------------------------------------
+// Append-only audit trail
+// ---------------------------------------------------------------------------
+
+/// Immutable history. Protected at the database level by a BEFORE UPDATE OR
+/// DELETE trigger (see migrations) so no code path — including a bug in this
+/// application — can rewrite history.
+model TaskLog {
+  id        String        @id @default(uuid()) @db.Uuid
+  taskId    String        @map("task_id") @db.Uuid
+  projectId String        @map("project_id") @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  action    TaskLogAction
+  column    String
+  oldValue  String?       @map("old_value")
+  newValue  String?       @map("new_value")
+  metadata  Json?
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  task    Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([taskId, createdAt])
+  @@index([userId])
+  @@map("task_logs")
+}
+
+model Attachment {
+  id           String    @id @default(uuid()) @db.Uuid
+  taskId       String    @map("task_id") @db.Uuid
+  uploadedById String    @map("uploaded_by_id") @db.Uuid
+  fileName     String    @map("file_name")
+  fileUrl      String    @map("file_url")
+  mimeType     String    @map("mime_type")
+  fileSize     Int       @map("file_size")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([taskId])
+  @@map("attachments")
+}
+
+model Comment {
+  id         String    @id @default(uuid()) @db.Uuid
+  taskId     String    @map("task_id") @db.Uuid
+  authorId   String    @map("author_id") @db.Uuid
+  body       String
+  /// Internal discussion never reaches a CLIENT_GUEST payload.
+  isInternal Boolean   @default(true) @map("is_internal")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([taskId])
+  @@map("comments")
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+/// Refresh tokens are stored hashed; logout revokes rather than deletes so a
+/// stolen token can be traced.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  /// SHA-256 of the opaque token. The raw value is never persisted.
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  userAgent String?   @map("user_agent")
+  ipAddress String?   @map("ip_address")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}

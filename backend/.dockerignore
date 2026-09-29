@@ -1,0 +1,18 @@
+# The image builds from the lockfile and source only; sending any of this in
+# would bust the layer cache on every keystroke or leak a developer's .env.
+node_modules
+.next
+dist
+uploads
+logs
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+*.tsbuildinfo
+.git
+.vscode
+.idea
+README.md
+docs

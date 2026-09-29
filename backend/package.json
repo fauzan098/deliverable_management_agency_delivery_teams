@@ -1,0 +1,54 @@
+{
+  "name": "nodewave-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "release": "prisma migrate deploy && prisma db seed"
+  },
+  "dependencies": {
+    "@nodewave/prisma-ezfilter": "0.2.1",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "cors": "2.8.5",
+    "hono": "4.13.10",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.16.3",
+    "prisma": "7.10.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.14",
+    "@commitlint/cli": "20.2.0",
+    "@commitlint/config-conventional": "20.2.0",
+    "@types/bun": "1.4.2",
+    "@types/cors": "2.8.19",
+    "@types/jsonwebtoken": "9.0.10",
+    "@types/pg": "8.15.6",
+    "dotenv": "^18.0.4",
+    "husky": "9.1.7",
+    "lint-staged": "16.2.7",
+    "typescript": "5.9.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,json,jsonc}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
+  }
+}

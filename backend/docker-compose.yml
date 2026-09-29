@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: nodewave-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nodewave
+      POSTGRES_PASSWORD: nodewave
+      POSTGRES_DB: nodewave
+    ports:
+      - "55432:5432"
+    volumes:
+      - nodewave-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodewave -d nodewave"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nodewave-pgdata:
