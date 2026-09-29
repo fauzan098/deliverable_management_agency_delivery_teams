@@ -46,9 +46,10 @@ COPY --from=build --chown=bun:bun /app/prisma.config.ts ./prisma.config.ts
 COPY --from=build --chown=bun:bun /app/package.json ./package.json
 USER bun
 EXPOSE 3000
-# Attachment storage is the only thing the API keeps on disk; mount a volume
-# here or files vanish on every deploy.
-VOLUME ["/data"]
+# Attachment storage is the only thing the API keeps on disk. A Railway
+# Volume must be attached and mounted at /data (Service Settings > Volumes)
+# or files vanish on every deploy. Docker's VOLUME instruction is not
+# supported by Railway's Dockerfile builder and is intentionally omitted.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD bun -e "fetch('http://127.0.0.1:'+(process.env.PORT??3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["bun", "run", "start"]
